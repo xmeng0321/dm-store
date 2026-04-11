@@ -1,0 +1,11 @@
+[package]
+name = "dm-manager-lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dm-store-lib = { path = "../dm-store-lib" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"

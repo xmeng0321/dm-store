@@ -1,0 +1,14 @@
+[package]
+name = "dm-manager-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "dm-manager"
+path = "src/main.rs"
+
+[dependencies]
+dm-manager-lib = { path = "../dm-manager-lib" }
+dm-store-lib = { path = "../dm-store-lib" }
+clap = { version = "4", features = ["derive"] }
+rustyline = "15"

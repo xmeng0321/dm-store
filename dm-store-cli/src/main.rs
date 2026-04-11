@@ -1,0 +1,561 @@
+use clap::{Parser, Subcommand};
+use dm_store_lib::{DmStore, DmStoreConfig, DmStoreError, ParamType};
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
+
+#[derive(Parser)]
+#[command(name = "dm-store", about = "TR-181 data model store CLI")]
+struct Cli {
+    /// Path to the SQLite database file
+    #[arg(short, long, default_value = "dm-store.db")]
+    db: String,
+
+    /// Disable in-memory cache
+    #[arg(long)]
+    no_cache: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Clone)]
+enum Commands {
+    /// Get a parameter by exact path
+    Get {
+        /// Parameter path (e.g., Device.WiFi.Radio.1.Enable)
+        path: String,
+    },
+    /// Get all parameters of an object
+    GetObject {
+        /// Object path ending with '.' (e.g., Device.WiFi.Radio.1.)
+        path: String,
+    },
+    /// Set a parameter value
+    Set {
+        /// Parameter path
+        path: String,
+        /// New value
+        value: String,
+    },
+    /// Add a new instance to a multi-instance object
+    Add {
+        /// Multi-instance object path (e.g., Device.WiFi.Radio.)
+        path: String,
+    },
+    /// Delete an instance
+    Del {
+        /// Instance path (e.g., Device.WiFi.Radio.3.)
+        path: String,
+    },
+    /// List instance numbers of a multi-instance object
+    Instances {
+        /// Multi-instance object path (e.g., Device.WiFi.Radio.)
+        path: String,
+    },
+    /// Define an object in the data model
+    DefineObject {
+        /// Object path ending with '.'
+        path: String,
+        /// Mark as multi-instance object
+        #[arg(long)]
+        multi: bool,
+    },
+    /// Define a parameter in the data model
+    DefineParam {
+        /// Parameter path
+        path: String,
+        /// Parameter type
+        #[arg(long, default_value = "string")]
+        r#type: String,
+        /// Read-only parameter
+        #[arg(long)]
+        readonly: bool,
+        /// Default value
+        #[arg(long)]
+        default: Option<String>,
+    },
+    /// Dump all objects and parameters
+    Dump,
+    /// Start interactive REPL shell
+    Shell,
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    let config = DmStoreConfig {
+        use_cache: !cli.no_cache,
+    };
+
+    let mut store = match DmStore::open_with_config(&cli.db, config) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error opening database: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    match cli.command {
+        Some(cmd) => {
+            if let Err(e) = execute_command(&mut store, &cmd) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        None => {
+            // No subcommand: show help
+            eprintln!("No command specified. Use --help for usage.");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn execute_command(store: &mut DmStore, cmd: &Commands) -> Result<(), DmStoreError> {
+    match cmd {
+        Commands::Get { path } => {
+            let param = store.get(path)?;
+            println!("{}", param);
+        }
+        Commands::GetObject { path } => {
+            let params = store.get_object(path)?;
+            if params.is_empty() {
+                println!("No parameters found for {}", path);
+            } else {
+                for p in &params {
+                    println!("{}", p);
+                }
+            }
+        }
+        Commands::Set { path, value } => {
+            let mut session = store.session()?;
+            session.set(path, value)?;
+            session.commit()?;
+            println!("OK");
+        }
+        Commands::Add { path } => {
+            let mut session = store.session()?;
+            let result = session.add(path)?;
+            session.commit()?;
+            println!(
+                "Added instance {} at {}",
+                result.instance_number, result.path
+            );
+        }
+        Commands::Del { path } => {
+            let mut session = store.session()?;
+            session.delete(path)?;
+            session.commit()?;
+            println!("Deleted {}", path);
+        }
+        Commands::Instances { path } => {
+            let nums = store.instances(path)?;
+            if nums.is_empty() {
+                println!("No instances for {}", path);
+            } else {
+                for n in &nums {
+                    println!("{}", n);
+                }
+            }
+        }
+        Commands::DefineObject { path, multi } => {
+            store.define_object(path, *multi)?;
+            let kind = if *multi { "multi-instance" } else { "single" };
+            println!("Defined {} object: {}", kind, path);
+        }
+        Commands::DefineParam {
+            path,
+            r#type,
+            readonly,
+            default,
+        } => {
+            let param_type =
+                ParamType::parse_name(r#type).ok_or_else(|| DmStoreError::InvalidPath {
+                    path: path.clone(),
+                    reason: format!("unknown type: {}", r#type),
+                })?;
+            store.define_parameter(path, param_type, !readonly, default.as_deref())?;
+            println!("Defined parameter: {} ({})", path, param_type);
+        }
+        Commands::Dump => {
+            dump_all(store)?;
+        }
+        Commands::Shell => {
+            run_repl(store)?;
+        }
+    }
+    Ok(())
+}
+
+fn dump_all(store: &DmStore) -> Result<(), DmStoreError> {
+    let conn = store.connection();
+
+    // Dump objects -- dm_object is all concrete, no filtering needed
+    println!("=== Objects ===");
+    let mut stmt = conn.prepare("SELECT path, is_multi FROM dm_object ORDER BY path")?;
+    let rows = stmt.query_map([], |row| {
+        let path: String = row.get(0)?;
+        let is_multi: bool = row.get(1)?;
+        Ok((path, is_multi))
+    })?;
+    for row in rows {
+        let (path, is_multi) = row?;
+        let multi_str = if is_multi { " [multi]" } else { "" };
+        // Derive schema template from canonicalize
+        let canonical = dm_store_lib::path::canonicalize(&path);
+        let inst_str = if canonical != path {
+            format!(" (schema: {})", canonical)
+        } else {
+            String::new()
+        };
+        println!("  {}{}{}", path, multi_str, inst_str);
+    }
+
+    // Dump parameters -- dm_param is all concrete, no filtering needed
+    println!("\n=== Parameters ===");
+    let mut stmt =
+        conn.prepare("SELECT path, value, param_type, writable FROM dm_param ORDER BY path")?;
+    let rows = stmt.query_map([], |row| {
+        let path: String = row.get(0)?;
+        let value: Option<String> = row.get(1)?;
+        let ptype: String = row.get(2)?;
+        let writable: bool = row.get(3)?;
+        Ok((path, value, ptype, writable))
+    })?;
+    for row in rows {
+        let (path, value, ptype, writable) = row?;
+        let val = value.as_deref().unwrap_or("(empty)");
+        let rw = if writable { "rw" } else { "ro" };
+        println!("  {} = {} ({}, {})", path, val, ptype, rw);
+    }
+
+    // Dump schema templates from dedicated schema tables
+    let mut stmt = conn.prepare("SELECT path, is_multi FROM dm_schema_object ORDER BY path")?;
+    let tmpl_objs: Vec<(String, bool)> = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt =
+        conn.prepare("SELECT path, param_type, writable FROM dm_schema_param ORDER BY path")?;
+    let tmpl_params: Vec<(String, String, bool)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if !tmpl_objs.is_empty() || !tmpl_params.is_empty() {
+        println!("\n=== Schema Templates ===");
+        for (path, is_multi) in &tmpl_objs {
+            let multi_str = if *is_multi { " [multi]" } else { "" };
+            println!("  {} [template]{}", path, multi_str);
+        }
+        for (path, ptype, writable) in &tmpl_params {
+            let rw = if *writable { "rw" } else { "ro" };
+            println!("  {} ({}, {})", path, ptype, rw);
+        }
+    }
+
+    Ok(())
+}
+
+fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
+    let mut rl = DefaultEditor::new().map_err(|e| DmStoreError::Schema(e.to_string()))?;
+    let history_path = dirs_hint();
+
+    if let Some(ref path) = history_path {
+        let _ = rl.load_history(path);
+    }
+
+    println!("dm-store interactive shell. Type 'help' for commands, 'quit' to exit.");
+
+    let mut in_session = false;
+
+    // We need to manage the session manually in the REPL since Session borrows &mut store.
+    // We use raw SQL savepoints for REPL sessions.
+    loop {
+        let prompt = if in_session { "dm(session)> " } else { "dm> " };
+        match rl.readline(prompt) {
+            Ok(line) => {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let _ = rl.add_history_entry(line);
+
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                let cmd = parts[0].to_lowercase();
+
+                match cmd.as_str() {
+                    "help" => print_repl_help(),
+                    "quit" | "exit" => {
+                        if in_session {
+                            let _ = store
+                                .connection()
+                                .execute_batch("ROLLBACK TO SAVEPOINT repl_session; RELEASE SAVEPOINT repl_session;");
+                            store.reload_cache()?;
+                            println!("Session aborted.");
+                        }
+                        break;
+                    }
+                    "begin" => {
+                        if in_session {
+                            println!(
+                                "Error: session already active. Use 'commit' or 'abort' first."
+                            );
+                        } else {
+                            store.connection().execute_batch("SAVEPOINT repl_session")?;
+                            in_session = true;
+                            println!("Session started.");
+                        }
+                    }
+                    "commit" => {
+                        if !in_session {
+                            println!("Error: no active session.");
+                        } else {
+                            store
+                                .connection()
+                                .execute_batch("RELEASE SAVEPOINT repl_session")?;
+                            in_session = false;
+                            println!("Session committed.");
+                        }
+                    }
+                    "abort" => {
+                        if !in_session {
+                            println!("Error: no active session.");
+                        } else {
+                            store
+                                .connection()
+                                .execute_batch("ROLLBACK TO SAVEPOINT repl_session; RELEASE SAVEPOINT repl_session;")?;
+                            store.reload_cache()?;
+                            in_session = false;
+                            println!("Session aborted.");
+                        }
+                    }
+                    "get" => {
+                        if parts.len() < 2 {
+                            println!("Usage: get <path>");
+                        } else {
+                            match store.get(parts[1]) {
+                                Ok(p) => println!("{}", p),
+                                Err(e) => println!("Error: {}", e),
+                            }
+                        }
+                    }
+                    "get-object" => {
+                        if parts.len() < 2 {
+                            println!("Usage: get-object <object_path>");
+                        } else {
+                            match store.get_object(parts[1]) {
+                                Ok(params) => {
+                                    if params.is_empty() {
+                                        println!("No parameters found.");
+                                    } else {
+                                        for p in &params {
+                                            println!("{}", p);
+                                        }
+                                    }
+                                }
+                                Err(e) => println!("Error: {}", e),
+                            }
+                        }
+                    }
+                    "set" => {
+                        if parts.len() < 3 {
+                            println!("Usage: set <path> <value>");
+                        } else {
+                            // For REPL set, use direct SQL if in session, or a mini-session
+                            let path = parts[1];
+                            let value = parts[2..].join(" ");
+                            if in_session {
+                                match repl_set(store, path, &value) {
+                                    Ok(()) => println!("OK"),
+                                    Err(e) => println!("Error: {}", e),
+                                }
+                            } else {
+                                let mut session = store.session()?;
+                                match session.set(path, &value) {
+                                    Ok(()) => {
+                                        session.commit()?;
+                                        println!("OK");
+                                    }
+                                    Err(e) => {
+                                        println!("Error: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "add" => {
+                        if parts.len() < 2 {
+                            println!("Usage: add <table_path>");
+                        } else {
+                            let mut session = store.session()?;
+                            match session.add(parts[1]) {
+                                Ok(r) => {
+                                    session.commit()?;
+                                    println!("Added instance {} at {}", r.instance_number, r.path);
+                                }
+                                Err(e) => {
+                                    println!("Error: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    "del" => {
+                        if parts.len() < 2 {
+                            println!("Usage: del <instance_path>");
+                        } else {
+                            let mut session = store.session()?;
+                            match session.delete(parts[1]) {
+                                Ok(()) => {
+                                    session.commit()?;
+                                    store.reload_cache()?;
+                                    println!("Deleted {}", parts[1]);
+                                }
+                                Err(e) => {
+                                    println!("Error: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    "instances" => {
+                        if parts.len() < 2 {
+                            println!("Usage: instances <table_path>");
+                        } else {
+                            match store.instances(parts[1]) {
+                                Ok(nums) => {
+                                    if nums.is_empty() {
+                                        println!("No instances for {}", parts[1]);
+                                    } else {
+                                        for n in &nums {
+                                            println!("{}", n);
+                                        }
+                                    }
+                                }
+                                Err(e) => println!("Error: {}", e),
+                            }
+                        }
+                    }
+                    "define-object" => {
+                        if parts.len() < 2 {
+                            println!("Usage: define-object <path> [--multi]");
+                        } else {
+                            let is_multi = parts.get(2).is_some_and(|s| *s == "--multi");
+                            match store.define_object(parts[1], is_multi) {
+                                Ok(()) => {
+                                    let kind = if is_multi { "multi-instance" } else { "single" };
+                                    println!("Defined {} object: {}", kind, parts[1]);
+                                }
+                                Err(e) => println!("Error: {}", e),
+                            }
+                        }
+                    }
+                    "define-param" => {
+                        if parts.len() < 2 {
+                            println!("Usage: define-param <path> [type=string] [default=value] [readonly]");
+                        } else {
+                            let path = parts[1];
+                            let opts = &parts[2..];
+
+                            let mut ptype = ParamType::String;
+                            let mut writable = true;
+                            let mut default_val: Option<String> = None;
+
+                            for opt in opts {
+                                if let Some(t) = opt.strip_prefix("type=") {
+                                    if let Some(pt) = ParamType::parse_name(t) {
+                                        ptype = pt;
+                                    } else {
+                                        println!("Unknown type: {}", t);
+                                        continue;
+                                    }
+                                } else if let Some(d) = opt.strip_prefix("default=") {
+                                    default_val = Some(d.to_string());
+                                } else if *opt == "readonly" {
+                                    writable = false;
+                                }
+                            }
+
+                            match store.define_parameter(
+                                path,
+                                ptype,
+                                writable,
+                                default_val.as_deref(),
+                            ) {
+                                Ok(()) => println!("Defined parameter: {} ({})", path, ptype),
+                                Err(e) => println!("Error: {}", e),
+                            }
+                        }
+                    }
+                    "dump" => {
+                        if let Err(e) = dump_all(store) {
+                            println!("Error: {}", e);
+                        }
+                    }
+                    _ => {
+                        println!("Unknown command: {}. Type 'help' for commands.", cmd);
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
+                if in_session {
+                    let _ = store.connection().execute_batch(
+                        "ROLLBACK TO SAVEPOINT repl_session; RELEASE SAVEPOINT repl_session;",
+                    );
+                    store.reload_cache()?;
+                    println!("\nSession aborted.");
+                }
+                break;
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                break;
+            }
+        }
+    }
+
+    if let Some(ref path) = history_path {
+        let _ = rl.save_history(path);
+    }
+
+    println!("Bye.");
+    Ok(())
+}
+
+fn repl_set(store: &mut DmStore, path: &str, value: &str) -> Result<(), DmStoreError> {
+    let mut session = store.session()?;
+    session.set(path, value)?;
+    session.commit()?;
+    Ok(())
+}
+
+fn print_repl_help() {
+    println!(
+        "Commands:
+  get <path>                    Get a parameter by exact path
+  get-object <object_path>      Get all parameters of an object
+  set <path> <value>            Set a parameter value
+  add <table_path>              Add instance to multi-instance object
+  del <instance_path>           Delete an instance
+  instances <table_path>        List instance numbers of a multi-instance object
+  define-object <path> [--multi]  Define an object
+  define-param <path> [type=T] [default=V] [readonly]  Define a parameter
+  dump                          Dump all objects and parameters
+  begin                         Start a session
+  commit                        Commit current session
+  abort                         Abort current session
+  help                          Show this help
+  quit                          Exit"
+    );
+}
+
+fn dirs_hint() -> Option<String> {
+    std::env::var("HOME")
+        .ok()
+        .map(|h| format!("{}/.dm-store-history", h))
+}

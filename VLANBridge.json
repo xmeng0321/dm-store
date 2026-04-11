@@ -1,0 +1,436 @@
+[
+    {
+        "object": "Device.Bridging.",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "MaxBridgeEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt",
+                "const": "20"
+            },
+            {
+                "name": "MaxDBridgeEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt",
+                "const": "20"
+            },
+            {
+                "name": "MaxQBridgeEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt",
+                "const": "20"
+            },
+            {
+                "name": "MaxVLANEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt",
+                "const": "20"
+            },
+            {
+                "name": "BridgeNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.Bridge.{i}.",
+        "uniqueKeys": "Name,Alias",
+        "access": "readWrite",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "Name",
+                "access": "readOnly",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "Alias",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "Status",
+                "access": "readOnly",
+                "dataType": "enum",
+                "enum": [
+                    "Disabled",
+                    "Enabled",
+                    "Error"
+                ],
+                "default": "Disabled"
+            },
+            {
+                "name": "Standard",
+                "access": "readWrite",
+                "dataType": "enum",
+                "enum": [
+                    "802.1D-2004",
+                    "802.1Q-2005",
+                    "802.1Q-2011"
+                ],
+                "default": "802.1Q-2011"
+            },
+            {
+                "name": "PortNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            },
+            {
+                "name": "VLANNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            },
+            {
+                "name": "VLANPortNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.Bridge.{i}.STP.",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean",
+                "uci": "stp"
+            },
+            {
+                "name": "Status",
+                "access": "readOnly",
+                "dataType": "enum",
+                "enum": [
+                    "Disabled",
+                    "Enabled",
+                    "Error_Misconfigured",
+                    "Error"
+                ],
+                "default": "Disabled"
+            },
+            {
+                "name": "Protocol",
+                "access": "readWrite",
+                "dataType": "enum",
+                "enum": [
+                    "STP",
+                    "RSTP"
+                ]
+            },
+            {
+                "name": "BridgePriority",
+                "access": "readWrite",
+                "dataType": "unsignedInt(0:61440)",
+                "default": "32768"
+            },
+            {
+                "name": "HelloTime",
+                "access": "readWrite",
+                "dataType": "unsignedInt(100:1000)",
+                "default": "200"
+            },
+            {
+                "name": "MaxAge",
+                "access": "readWrite",
+                "dataType": "unsignedInt(600:4000)",
+                "default": "2000"
+            },
+            {
+                "name": "ForwardingDelay",
+                "access": "readWrite",
+                "dataType": "unsignedInt(4:30)",
+                "default": "4"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.Bridge.{i}.Port.{i}.",
+        "uniqueKeys": "Alias,Name",
+        "access": "readWrite",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "Status",
+                "access": "readOnly",
+                "dataType": "enum",
+                "enum": [
+                    "Up",
+                    "Down",
+                    "Unknown",
+                    "Dormant",
+                    "NotPresent",
+                    "LowerLayerDown",
+                    "Error"
+                ],
+                "default": "Down"
+            },
+            {
+                "name": "Alias",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "Name",
+                "access": "readOnly",
+                "dataType": "string(:64)",
+                "set_on_create": "port_",
+                "db": "true",
+                "flags": [
+                    "linker"
+                ],
+                "js-value": "ifname"
+            },
+            {
+                "name": "LastChange",
+                "access": "readOnly",
+                "dataType": "unsignedInt",
+                "const": "0"
+            },
+            {
+                "name": "LowerLayers",
+                "access": "readWrite",
+                "dataType": "pathRef[]",
+                "pathRef": [
+                    "Device.Bridging.Bridge.{i}.Port."
+                ]
+            },
+            {
+                "name": "ManagementPort",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "PriorityRegeneration",
+                "access": "readWrite",
+                "dataType": "unsignedInt(0:7)[]",
+                "default": "0,1,2,3,4,5,6,7"
+            },
+            {
+                "name": "{BBF_VENDOR_PREFIX}EgressPriorityRegeneration",
+                "access": "readWrite",
+                "dataType": "unsignedInt(0:7)[]"
+            },
+            {
+                "name": "Type",
+                "access": "readWrite",
+                "dataType": "enum",
+                "enum": [
+                    "ProviderNetworkPort",
+                    "CustomerNetworkPort",
+                    "CustomerEdgePort",
+                    "CustomerVLANPort",
+                    "VLANUnawarePort"
+                ],
+                "default": "CustomerVLANPort"
+            },
+            {
+                "name": "PVID",
+                "access": "readWrite",
+                "dataType": "int(1:4094)",
+                "default": "1"
+            },
+            {
+                "name": "TPID",
+                "access": "readWrite",
+                "dataType": "unsignedInt",
+                "default": "33024"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.Bridge.{i}.Port.{i}.Stats.",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "BytesSent",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "BytesReceived",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "PacketsSent",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "PacketsReceived",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "ErrorsSent",
+                "dataType": "StatsCounter32"
+            },
+            {
+                "name": "ErrorsReceived",
+                "dataType": "StatsCounter32"
+            },
+            {
+                "name": "UnicastPacketsSent",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "DiscardPacketsSent",
+                "dataType": "StatsCounter32"
+            },
+            {
+                "name": "DiscardPacketsReceived",
+                "dataType": "StatsCounter32"
+            },
+            {
+                "name": "MulticastPacketsSent",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "UnicastPacketsReceived",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "MulticastPacketsReceived",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "BroadcastPacketsSent",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "BroadcastPacketsReceived",
+                "dataType": "unsignedLong"
+            },
+            {
+                "name": "UnknownProtoPacketsReceived",
+                "dataType": "StatsCounter32"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.Bridge.{i}.VLAN.{i}.",
+        "uniqueKeys": "Alias,VLANID",
+        "access": "readWrite",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "Name",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "Alias",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "VLANID",
+                "access": "readWrite",
+                "dataType": "int(0:4094)"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.Bridge.{i}.VLANPort.{i}.",
+        "uniqueKeys": "Alias,VLAN",
+        "access": "readWrite",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "Alias",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "VLAN",
+                "access": "readWrite",
+                "dataType": "pathRef",
+                "pathRef": [
+                    "Device.Bridging.Bridge.{i}.VLAN."
+                ]
+            },
+            {
+                "name": "Port",
+                "access": "readWrite",
+                "dataType": "pathRef",
+                "pathRef": [
+                    "Device.Bridging.Bridge.{i}.Port."
+                ]
+            },
+            {
+                "name": "Untagged",
+                "access": "readWrite",
+                "dataType": "boolean"
+            }
+        ]
+    },
+    {
+        "object": "Device.Bridging.ProviderBridge.{i}.",
+        "uniqueKeys": "Alias",
+        "access": "readWrite",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "Status",
+                "access": "readOnly",
+                "dataType": "enum",
+                "enum": [
+                    "Disabled",
+                    "Enabled",
+                    "Error_Misconfigured",
+                    "Error"
+                ],
+                "default": "Disabled"
+            },
+            {
+                "name": "Alias",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "Type",
+                "access": "readWrite",
+                "dataType": "enum",
+                "enum": [
+                    "S-VLAN",
+                    "PE"
+                ]
+            },
+            {
+                "name": "SVLANcomponent",
+                "access": "readWrite",
+                "dataType": "pathRef",
+                "pathRef": [
+                    "Device.Bridging.Bridge."
+                ]
+            },
+            {
+                "name": "CVLANcomponents",
+                "access": "readWrite",
+                "dataType": "pathRef[]",
+                "pathRef": [
+                    "Device.Bridging.Bridge."
+                ]
+            }
+        ]
+    }
+]

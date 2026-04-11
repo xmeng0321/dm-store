@@ -1,0 +1,3 @@
+[workspace]
+members = ["dm-store-lib", "dm-store-cli", "dm-manager-lib", "dm-manager-cli"]
+resolver = "2"

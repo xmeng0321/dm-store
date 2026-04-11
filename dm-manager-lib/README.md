@@ -1,6 +1,6 @@
-# dm-manager
+# dm-manager-lib
 
-A TR-181 data model manager built on top of [dm-store-lib](../dm-store-lib). Loads data model schemas from JSON files, validates paths and values, and provides hooks for read-only parameters and dynamic instances.
+A TR-181 data model manager library built on top of [dm-store-lib](../dm-store-lib). Loads data model schemas from JSON files, validates paths and values, and provides hooks for read-only parameters and dynamic instances.
 
 ## Overview
 
@@ -254,131 +254,16 @@ Read-only parameters work without explicit hook registration:
 | Hook registered | Hook return value |
 | None of the above | Empty string `""` |
 
-## CLI
 
-### Global Options
-
-```
-dm-manager [OPTIONS] <COMMAND>
-
-Options:
-  -d, --db <DB>          Path to SQLite database file [default: dm-store.db]
-  -s, --schema <FILE>    JSON schema files to load (repeatable)
-  --no-cache             Disable in-memory cache
-  -h, --help             Print help
-```
-
-### Commands
-
-```bash
-# Load a schema and query it
-dm-manager -s VLANBridge.json list-schema
-dm-manager -s VLANBridge.json schema "Device.Bridging.Bridge.{i}."
-
-# Add instances and set values
-dm-manager -s VLANBridge.json add "Device.Bridging.Bridge."
-dm-manager -s VLANBridge.json set "Device.Bridging.Bridge.1.Enable" "true"
-dm-manager -s VLANBridge.json get "Device.Bridging.Bridge.1.Enable"
-
-# Get all parameters of an object
-dm-manager -s VLANBridge.json get-object "Device.Bridging.Bridge.1."
-
-# List instances
-dm-manager -s VLANBridge.json instances "Device.Bridging.Bridge."
-
-# Dump everything (schema + stored data)
-dm-manager -s VLANBridge.json dump
-
-# Delete an instance
-dm-manager -s VLANBridge.json del "Device.Bridging.Bridge.1."
-```
-
-### Interactive REPL
-
-```bash
-dm-manager -s VLANBridge.json shell
-```
-
-The REPL provides tab completion for commands and schema paths.
+## Source Layout
 
 ```
-dm-mgr> get Device.Bridging.MaxBridgeEntries
-Device.Bridging.MaxBridgeEntries = 20 (unsignedInt, read-only)
-
-dm-mgr> add Device.Bridging.Bridge.
-Added instance 1 at Device.Bridging.Bridge.1.
-
-dm-mgr> set Device.Bridging.Bridge.1.Enable true
-OK
-
-dm-mgr> get-object Device.Bridging.Bridge.1.
-Device.Bridging.Bridge.1.Enable = true (boolean, writable)
-Device.Bridging.Bridge.1.Name =  (string, read-only)
-Device.Bridging.Bridge.1.Alias = (empty) (string, writable)
-Device.Bridging.Bridge.1.Status = Disabled (string, read-only)
-Device.Bridging.Bridge.1.Standard = 802.1Q-2011 (string, writable)
-...
-
-dm-mgr> begin
-Session started.
-dm-mgr(session)> set Device.Bridging.Bridge.1.Enable false
-OK
-dm-mgr(session)> abort
-Session aborted.
-```
-
-### REPL Commands
-
-| Command | Description |
-|---|---|
-| `load <file>` | Load a JSON schema file |
-| `get <path>` | Get parameter value |
-| `get-object <path>` | Get all parameters of an object |
-| `set <path> <value>` | Set parameter value |
-| `add <path>` | Add instance to multi-instance object |
-| `del <path>` | Delete an instance |
-| `instances <path>` | List instance numbers |
-| `schema <path>` | Show schema info for a path |
-| `list-schema` | List all schema paths |
-| `dump` | Dump all data |
-| `begin` | Start a session |
-| `commit` | Commit current session |
-| `abort` | Abort current session |
-| `help` | Show help |
-| `quit` | Exit |
-
-## Validation
-
-The `set` command validates both path and value:
-
-```
-dm-mgr> set Device.Bridging.Bridge.1.Enable invalid
-Error: invalid value for Device.Bridging.Bridge.{i}.Enable: expected boolean (true/false/1/0), got 'invalid'
-
-dm-mgr> set Device.Bridging.Bridge.1.Status Enabled
-Error: parameter is read-only: Device.Bridging.Bridge.1.Status
-
-dm-mgr> set Device.Bridging.Bridge.1.Standard BadValue
-Error: invalid value for Device.Bridging.Bridge.{i}.Standard: value 'BadValue' not in allowed values: ["802.1D-2004", "802.1Q-2005", "802.1Q-2011"]
-
-dm-mgr> get Device.NonExistent.Param
-Error: path not found in schema: Device.NonExistent.Param
-```
-
-## Project Structure
-
-```
-dm-manager-lib/
-  src/
-    lib.rs          Public API re-exports
-    error.rs        DmManagerError enum
-    schema.rs       DmSchema, ObjectSchema, ParamSchema, Access, ValueConstraint
-    parser.rs       JSON deserialization + data type parsing
-    loader.rs       Load JSON -> DmSchema + register writable items in DmStore
-    validate.rs     Value validation against type/constraints
-    manager.rs      DmManager struct: get/set/instances, hooks, sessions
-
-dm-manager-cli/
-  src/
-    main.rs         clap CLI + rustyline REPL with tab completion
+src/
+  lib.rs          Public API re-exports
+  error.rs        DmManagerError enum
+  schema.rs       DmSchema, ObjectSchema, ParamSchema, Access, ValueConstraint
+  parser.rs       JSON deserialization + data type parsing
+  loader.rs       Load JSON -> DmSchema + register writable items in DmStore
+  validate.rs     Value validation against type/constraints
+  manager.rs      DmManager struct: get/set/instances, hooks, sessions
 ```

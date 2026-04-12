@@ -38,9 +38,8 @@ define Package/dm-store/description
 endef
 
 define Build/Compile
-	$(call Build/Compile/Cargo,, \
-		--release \
-		--workspace)
+	$(call Build/Compile/Cargo,dm-store-cli,)
+	$(call Build/Compile/Cargo,dm-manager-cli,)
 endef
 
 define Package/dm-store/install

@@ -163,6 +163,27 @@ impl DmStore {
         Self::get_from_db(&self.conn, path, hash)
     }
 
+    /// Borrow a parameter directly from the in-memory cache. Returns None
+    /// when the cache is disabled or the path is not resolved there. No DB
+    /// fallback -- callers that need guaranteed lookup should use `get`.
+    /// Intended for hot read paths that want to avoid Parameter clones.
+    pub fn get_cached(&self, path: &str) -> Option<&Parameter> {
+        let cache = self.cache.as_ref()?;
+        let hash = fnv1a_hash(path);
+        cache.get(&hash)?.iter().find(|p| p.path == path)
+    }
+
+    /// Borrow the cached instance-number list for a table path. Returns
+    /// None when caching is disabled. Like `get_cached`, this is a
+    /// zero-copy fast path -- callers wanting the DB-backed answer should
+    /// use `instances`.
+    pub fn instances_cached(&self, table_path: &str) -> Option<&[u32]> {
+        self.instance_cache
+            .as_ref()?
+            .get(table_path)
+            .map(Vec::as_slice)
+    }
+
     pub(crate) fn get_from_db(
         conn: &Connection,
         path: &str,

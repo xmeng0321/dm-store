@@ -41,11 +41,13 @@ impl<'a> Session<'a> {
     }
 
     fn refresh_caches_from_db(&mut self) -> Result<(), DmStoreError> {
-        if self.cache.is_some() {
-            *self.cache = Some(DmStore::load_cache(self.conn)?);
+        // Only refresh caches that are currently enabled -- never flip a
+        // disabled cache back on by assigning Some(...) unconditionally.
+        if let Some(cache) = self.cache.as_mut() {
+            *cache = DmStore::load_cache(self.conn)?;
         }
-        if self.instance_cache.is_some() {
-            *self.instance_cache = Some(DmStore::load_instance_cache(self.conn)?);
+        if let Some(icache) = self.instance_cache.as_mut() {
+            *icache = DmStore::load_instance_cache(self.conn)?;
         }
         Ok(())
     }

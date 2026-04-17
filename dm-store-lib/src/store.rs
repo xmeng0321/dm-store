@@ -85,7 +85,16 @@ impl DmStore {
                 param_type,
                 writable,
             };
-            map.entry(hash).or_default().push(param);
+            let bucket = map.entry(hash).or_default();
+            if let Some(existing) = bucket.first() {
+                log::warn!(
+                    "FNV-1a hash collision on load_cache: hash={:#x}, paths=[{}, {}]",
+                    hash,
+                    existing.path,
+                    param.path
+                );
+            }
+            bucket.push(param);
         }
 
         Ok(map)
@@ -1039,5 +1048,52 @@ mod tests {
 
         let param = store.get("Device.Test.Name").unwrap();
         assert_eq!(param.value.as_deref(), Some("hello"));
+    }
+
+    /// Synthesise a hash collision by forcing two rows in dm_param to share
+    /// the same path_hash. load_cache must keep both entries; get() must
+    /// still resolve each by path equality.
+    #[test]
+    fn test_cache_handles_hash_collision() {
+        let mut store = DmStore::open_in_memory().unwrap();
+        store.define_object("Device.", false).unwrap();
+        store.define_object("Device.A.", false).unwrap();
+        store.define_object("Device.B.", false).unwrap();
+        store
+            .define_parameter("Device.A.Name", ParamType::String, true, Some("a"))
+            .unwrap();
+        store
+            .define_parameter("Device.B.Name", ParamType::String, true, Some("b"))
+            .unwrap();
+
+        // Force both rows to share a synthetic hash value.
+        let collision_hash: i64 = 0x4242_4242_4242_4242u64 as i64;
+        store
+            .connection()
+            .execute(
+                "UPDATE dm_param SET path_hash = ?1 WHERE path IN ('Device.A.Name', 'Device.B.Name')",
+                rusqlite::params![collision_hash],
+            )
+            .unwrap();
+
+        // Reload so the in-memory cache picks up the collision.
+        store.reload_cache().unwrap();
+
+        // Direct DB lookups bypass the cache -- they must use the fake hash.
+        let a = DmStore::get_from_db(store.connection(), "Device.A.Name", collision_hash).unwrap();
+        assert_eq!(a.value.as_deref(), Some("a"));
+        let b = DmStore::get_from_db(store.connection(), "Device.B.Name", collision_hash).unwrap();
+        assert_eq!(b.value.as_deref(), Some("b"));
+
+        // Cache path: DmStore::get computes the real hash which no longer
+        // matches the stored synthetic hash, so this exercises the DB
+        // fallback path. To test cache lookup with a collision, inspect the
+        // cache directly.
+        let cache = store.cache.as_ref().expect("cache enabled");
+        let bucket = cache.get(&collision_hash).expect("bucket for collision hash");
+        assert_eq!(bucket.len(), 2, "both paths must share the bucket");
+        let paths: Vec<&str> = bucket.iter().map(|p| p.path.as_str()).collect();
+        assert!(paths.contains(&"Device.A.Name"));
+        assert!(paths.contains(&"Device.B.Name"));
     }
 }

@@ -77,6 +77,7 @@ pub struct ObjectSchema {
 }
 
 /// The complete in-memory schema, keyed by template paths.
+#[derive(Default)]
 pub struct DmSchema {
     objects: HashMap<String, ObjectSchema>,
     params: HashMap<String, ParamSchema>,
@@ -84,10 +85,7 @@ pub struct DmSchema {
 
 impl DmSchema {
     pub fn new() -> Self {
-        DmSchema {
-            objects: HashMap::new(),
-            params: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn add_object(&mut self, obj: ObjectSchema) {

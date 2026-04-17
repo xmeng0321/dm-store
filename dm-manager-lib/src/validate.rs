@@ -57,7 +57,7 @@ pub fn validate_value(value: &str, schema: &ParamSchema) -> Result<(), DmManager
             check_string_constraint(path, value, &schema.constraint)?;
         }
         ParamType::HexBinary => {
-            if value.len() % 2 != 0 {
+            if !value.len().is_multiple_of(2) {
                 return Err(DmManagerError::InvalidValue {
                     path: path.clone(),
                     reason: "hexBinary must have even length".to_string(),
@@ -193,20 +193,19 @@ fn check_string_constraint(
     constraint: &ValueConstraint,
 ) -> Result<(), DmManagerError> {
     match constraint {
-        ValueConstraint::Length { max } => {
-            if let Some(max_len) = max {
-                if value.len() > *max_len {
-                    return Err(DmManagerError::InvalidValue {
-                        path: path.to_string(),
-                        reason: format!(
-                            "string length {} exceeds maximum {}",
-                            value.len(),
-                            max_len
-                        ),
-                    });
-                }
+        ValueConstraint::Length { max: Some(max_len) } => {
+            if value.len() > *max_len {
+                return Err(DmManagerError::InvalidValue {
+                    path: path.to_string(),
+                    reason: format!(
+                        "string length {} exceeds maximum {}",
+                        value.len(),
+                        max_len
+                    ),
+                });
             }
         }
+        ValueConstraint::Length { max: None } => {}
         ValueConstraint::Enum(variants) => {
             if !variants.iter().any(|v| v == value) {
                 return Err(DmManagerError::InvalidValue {

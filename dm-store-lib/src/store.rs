@@ -1226,4 +1226,72 @@ mod tests {
         assert!(paths.contains(&"Device.A.Name"));
         assert!(paths.contains(&"Device.B.Name"));
     }
+
+    /// After a session is aborted, subsequent reads must observe the
+    /// pre-session value — not whatever the aborted session attempted
+    /// to write. Verifies caches and DB stay in lock-step on rollback.
+    #[test]
+    fn test_session_abort_restores_pre_session_value() {
+        let mut store = DmStore::open_in_memory().unwrap();
+        store.define_object("Device.", false).unwrap();
+        store
+            .define_parameter("Device.Name", ParamType::String, true, Some("before"))
+            .unwrap();
+
+        {
+            let mut session = store.session().unwrap();
+            session.set("Device.Name", "after").unwrap();
+            assert_eq!(
+                session.get("Device.Name").unwrap().value.as_deref(),
+                Some("after"),
+                "session observes its own write before abort"
+            );
+            session.abort().unwrap();
+        }
+
+        let param = store.get("Device.Name").unwrap();
+        assert_eq!(
+            param.value.as_deref(),
+            Some("before"),
+            "post-abort read must see pre-session value"
+        );
+    }
+
+    /// Two sequential sessions — one with cache ON, one with cache OFF
+    /// — must converge to the same final state. Catches any cache
+    /// invalidation path that forgets to invalidate in one mode.
+    #[test]
+    fn test_sequential_sessions_cache_on_and_off_converge() {
+        fn run(cache: bool) -> Option<String> {
+            let mut store = DmStore::open_with_config(
+                ":memory:",
+                DmStoreConfig { use_cache: cache },
+            )
+            .unwrap();
+            store.define_object("Device.", false).unwrap();
+            store.define_object("Device.WiFi.", true).unwrap();
+            store
+                .define_parameter("Device.WiFi.{i}.SSID", ParamType::String, true, Some("default"))
+                .unwrap();
+
+            let mut s1 = store.session().unwrap();
+            let r1 = s1.add("Device.WiFi.").unwrap();
+            s1.set(&format!("{}SSID", r1.path), "net-a").unwrap();
+            s1.commit().unwrap();
+
+            let mut s2 = store.session().unwrap();
+            s2.set("Device.WiFi.1.SSID", "net-b").unwrap();
+            s2.commit().unwrap();
+
+            store
+                .get("Device.WiFi.1.SSID")
+                .unwrap()
+                .value
+        }
+
+        let with_cache = run(true);
+        let without_cache = run(false);
+        assert_eq!(with_cache, without_cache);
+        assert_eq!(with_cache.as_deref(), Some("net-b"));
+    }
 }

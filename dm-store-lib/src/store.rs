@@ -567,7 +567,12 @@ impl DmStore {
         let resolved_paths = self.collect_resolved_paths(tmpl_param_path)?;
 
         for resolved in resolved_paths {
-            let obj_path = path::parent_path(&resolved).unwrap();
+            let obj_path = path::parent_path(&resolved).ok_or_else(|| {
+                DmStoreError::InvalidPath {
+                    path: resolved.clone(),
+                    reason: "resolved template parameter has no parent object".to_string(),
+                }
+            })?;
 
             // Verify parent object exists in dm_object
             let obj_hash = fnv1a_hash(&obj_path);

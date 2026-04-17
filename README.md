@@ -101,6 +101,30 @@ cargo build --release
 
 Binaries are at `target/release/dm-store` and `target/release/dm-manager`.
 
+### Test
+
+```bash
+cargo test --workspace
+```
+
+The `dm-store-lib` test suite covers session commit/abort cache
+coherency, FNV-1a hash-collision handling, schema-template propagation
+to existing instances, nested instance deletion, and convergence of
+cache-on and cache-off modes.
+
+### Lint
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+### Workspace layout notes
+
+Shared dependencies (`rusqlite`, `clap`, `rustyline`, `thiserror`, etc.)
+are declared once under `[workspace.dependencies]` in the root
+`Cargo.toml` and inherited by each crate via `foo.workspace = true`.
+Bump versions in one place.
+
 ## License
 
 This project is provided as-is for internal use.

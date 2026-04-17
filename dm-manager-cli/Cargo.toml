@@ -10,6 +10,6 @@ path = "src/main.rs"
 [dependencies]
 dm-manager-lib = { path = "../dm-manager-lib" }
 dm-store-lib = { path = "../dm-store-lib" }
-clap = { version = "4", features = ["derive"] }
-log = "0.4"
-rustyline = "15"
+clap.workspace = true
+log.workspace = true
+rustyline.workspace = true

@@ -5,6 +5,6 @@ edition = "2021"
 description = "TR-181 data model store backed by SQLite with hash-accelerated lookups"
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
-thiserror = "2"
-log = "0.4"
+rusqlite.workspace = true
+thiserror.workspace = true
+log.workspace = true

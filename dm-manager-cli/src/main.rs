@@ -154,26 +154,17 @@ fn execute_command(mgr: &mut DmManager, cmd: &Commands) -> Result<(), DmManagerE
             let mut session = mgr.session()?;
             let result = session.add(path)?;
             session.commit()?;
-            println!(
-                "Added instance {} at {}",
-                result.instance_number, result.path
-            );
+            dm_store_lib::render::print_add_result(&result);
         }
         Commands::Del { path } => {
             let mut session = mgr.session()?;
             session.delete(path)?;
             session.commit()?;
-            println!("Deleted {}", path);
+            dm_store_lib::render::print_deleted(path);
         }
         Commands::Instances { path } => {
             let nums = mgr.instances(path)?;
-            if nums.is_empty() {
-                println!("No instances for {}", path);
-            } else {
-                for n in &nums {
-                    println!("{}", n);
-                }
-            }
+            dm_store_lib::render::print_instances(path, &nums);
         }
         Commands::Schema { path } => {
             show_schema(mgr, path);
@@ -618,10 +609,7 @@ fn run_repl(mgr: &mut DmManager) -> Result<(), DmManagerError> {
                                     if let Err(e) = session.commit() {
                                         println!("Error committing: {}", e);
                                     } else {
-                                        println!(
-                                            "Added instance {} at {}",
-                                            r.instance_number, r.path
-                                        );
+                                        dm_store_lib::render::print_add_result(&r);
                                         if let Some(h) = rl.helper_mut() {
                                             h.refresh_concrete_paths(mgr);
                                         }
@@ -648,7 +636,7 @@ fn run_repl(mgr: &mut DmManager) -> Result<(), DmManagerError> {
                                         println!("Error committing: {}", e);
                                     } else {
                                         let _ = mgr.store_mut().reload_cache();
-                                        println!("Deleted {}", parts[1]);
+                                        dm_store_lib::render::print_deleted(parts[1]);
                                         if let Some(h) = rl.helper_mut() {
                                             h.refresh_concrete_paths(mgr);
                                         }
@@ -664,13 +652,7 @@ fn run_repl(mgr: &mut DmManager) -> Result<(), DmManagerError> {
                         } else {
                             match mgr.instances(parts[1]) {
                                 Ok(nums) => {
-                                    if nums.is_empty() {
-                                        println!("No instances for {}", parts[1]);
-                                    } else {
-                                        for n in &nums {
-                                            println!("{}", n);
-                                        }
-                                    }
+                                    dm_store_lib::render::print_instances(parts[1], &nums);
                                 }
                                 Err(e) => println!("Error: {}", e),
                             }

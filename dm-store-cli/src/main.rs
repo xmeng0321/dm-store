@@ -136,26 +136,17 @@ fn execute_command(store: &mut DmStore, cmd: &Commands) -> Result<(), DmStoreErr
             let mut session = store.session()?;
             let result = session.add(path)?;
             session.commit()?;
-            println!(
-                "Added instance {} at {}",
-                result.instance_number, result.path
-            );
+            dm_store_lib::render::print_add_result(&result);
         }
         Commands::Del { path } => {
             let mut session = store.session()?;
             session.delete(path)?;
             session.commit()?;
-            println!("Deleted {}", path);
+            dm_store_lib::render::print_deleted(path);
         }
         Commands::Instances { path } => {
             let nums = store.instances(path)?;
-            if nums.is_empty() {
-                println!("No instances for {}", path);
-            } else {
-                for n in &nums {
-                    println!("{}", n);
-                }
-            }
+            dm_store_lib::render::print_instances(path, &nums);
         }
         Commands::DefineObject { path, multi } => {
             store.define_object(path, *multi)?;
@@ -339,7 +330,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                             match session.add(parts[1]) {
                                 Ok(r) => {
                                     session.commit()?;
-                                    println!("Added instance {} at {}", r.instance_number, r.path);
+                                    dm_store_lib::render::print_add_result(&r);
                                 }
                                 Err(e) => {
                                     println!("Error: {}", e);
@@ -355,7 +346,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                             match session.delete(parts[1]) {
                                 Ok(()) => {
                                     session.commit()?;
-                                    println!("Deleted {}", parts[1]);
+                                    dm_store_lib::render::print_deleted(parts[1]);
                                 }
                                 Err(e) => {
                                     println!("Error: {}", e);
@@ -369,13 +360,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                         } else {
                             match store.instances(parts[1]) {
                                 Ok(nums) => {
-                                    if nums.is_empty() {
-                                        println!("No instances for {}", parts[1]);
-                                    } else {
-                                        for n in &nums {
-                                            println!("{}", n);
-                                        }
-                                    }
+                                    dm_store_lib::render::print_instances(parts[1], &nums);
                                 }
                                 Err(e) => println!("Error: {}", e),
                             }

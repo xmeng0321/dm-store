@@ -1,5 +1,6 @@
 pub mod error;
 pub mod path;
+pub mod render;
 mod schema;
 pub mod session;
 pub mod store;

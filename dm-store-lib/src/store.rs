@@ -627,6 +627,60 @@ impl DmStore {
         self.config.use_cache
     }
 
+    /// Snapshot every row in dm_object, dm_param, dm_schema_object, and
+    /// dm_schema_param for presentation by CLIs or tools. Concrete and schema
+    /// tables are returned separately, each sorted by path.
+    pub fn dump(&self) -> Result<DmDump, DmStoreError> {
+        let objects = Self::dump_objects(&self.conn, "dm_object")?;
+        let params = Self::dump_params(&self.conn, "dm_param")?;
+        let schema_objects = Self::dump_objects(&self.conn, "dm_schema_object")?;
+        let schema_params = Self::dump_params(&self.conn, "dm_schema_param")?;
+        Ok(DmDump {
+            objects,
+            params,
+            schema_objects,
+            schema_params,
+        })
+    }
+
+    fn dump_objects(
+        conn: &Connection,
+        table: &str,
+    ) -> Result<Vec<DumpedObject>, DmStoreError> {
+        // Table name is a crate-controlled constant; interpolation is safe.
+        let sql = format!("SELECT path, is_multi FROM {} ORDER BY path", table);
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DumpedObject {
+                path: row.get(0)?,
+                is_multi: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(DmStoreError::Sqlite)
+    }
+
+    fn dump_params(
+        conn: &Connection,
+        table: &str,
+    ) -> Result<Vec<DumpedParam>, DmStoreError> {
+        let sql = format!(
+            "SELECT path, value, param_type, writable FROM {} ORDER BY path",
+            table
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DumpedParam {
+                path: row.get(0)?,
+                value: row.get(1)?,
+                param_type: row.get(2)?,
+                writable: row.get(3)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(DmStoreError::Sqlite)
+    }
+
     /// Begin a named savepoint. Intended for interactive contexts (e.g. the
     /// REPL) that need a batch scope spanning multiple `session()` calls.
     /// Use `release_savepoint` to commit or `rollback_savepoint` to abort.

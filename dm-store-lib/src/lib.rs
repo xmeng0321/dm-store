@@ -7,4 +7,6 @@ pub mod types;
 
 pub use error::DmStoreError;
 pub use store::DmStore;
-pub use types::{AddResult, DmStoreConfig, Object, ParamType, Parameter};
+pub use types::{
+    AddResult, DmDump, DmStoreConfig, DumpedObject, DumpedParam, Object, ParamType, Parameter,
+};

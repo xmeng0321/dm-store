@@ -310,79 +310,30 @@ fn dump_all(mgr: &DmManager) -> Result<(), DmManagerError> {
         println!("  {} ({}, {}) = {}", path, ps.data_type_raw, rw, val);
     }
 
-    // Dump stored data from dm-store
-    let conn = mgr.store().connection();
+    let dump = mgr.store().dump().map_err(DmManagerError::Store)?;
 
     println!("\n=== Stored Objects ===");
-    let mut stmt = conn
-        .prepare("SELECT path, is_multi FROM dm_object ORDER BY path")
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    let rows = stmt
-        .query_map([], |row| {
-            let path: String = row.get(0)?;
-            let is_multi: bool = row.get(1)?;
-            Ok((path, is_multi))
-        })
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    for row in rows {
-        let (path, is_multi) = row.map_err(|e| DmManagerError::Store(e.into()))?;
-        let multi_str = if is_multi { " [multi]" } else { "" };
-        println!("  {}{}", path, multi_str);
+    for obj in &dump.objects {
+        let multi_str = if obj.is_multi { " [multi]" } else { "" };
+        println!("  {}{}", obj.path, multi_str);
     }
 
     println!("\n=== Stored Schema Templates ===");
-    let mut stmt = conn
-        .prepare("SELECT path, is_multi FROM dm_schema_object ORDER BY path")
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
-        })
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    for row in rows {
-        let (path, is_multi) = row.map_err(|e| DmManagerError::Store(e.into()))?;
-        let multi_str = if is_multi { " [multi]" } else { "" };
-        println!("  {}{}", path, multi_str);
+    for obj in &dump.schema_objects {
+        let multi_str = if obj.is_multi { " [multi]" } else { "" };
+        println!("  {}{}", obj.path, multi_str);
     }
-
-    let mut stmt = conn
-        .prepare("SELECT path, value, param_type, writable FROM dm_schema_param ORDER BY path")
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, bool>(3)?,
-            ))
-        })
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    for row in rows {
-        let (path, value, ptype, writable) = row.map_err(|e| DmManagerError::Store(e.into()))?;
-        let val = value.as_deref().unwrap_or("(empty)");
-        let rw = if writable { "rw" } else { "ro" };
-        println!("  {} = {} ({}, {})", path, val, ptype, rw);
+    for p in &dump.schema_params {
+        let val = p.value.as_deref().unwrap_or("(empty)");
+        let rw = if p.writable { "rw" } else { "ro" };
+        println!("  {} = {} ({}, {})", p.path, val, p.param_type, rw);
     }
 
     println!("\n=== Stored Parameters ===");
-    let mut stmt = conn
-        .prepare("SELECT path, value, param_type, writable FROM dm_param ORDER BY path")
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    let rows = stmt
-        .query_map([], |row| {
-            let path: String = row.get(0)?;
-            let value: Option<String> = row.get(1)?;
-            let ptype: String = row.get(2)?;
-            let writable: bool = row.get(3)?;
-            Ok((path, value, ptype, writable))
-        })
-        .map_err(|e| DmManagerError::Store(e.into()))?;
-    for row in rows {
-        let (path, value, ptype, writable) = row.map_err(|e| DmManagerError::Store(e.into()))?;
-        let val = value.as_deref().unwrap_or("(empty)");
-        let rw = if writable { "rw" } else { "ro" };
-        println!("  {} = {} ({}, {})", path, val, ptype, rw);
+    for p in &dump.params {
+        let val = p.value.as_deref().unwrap_or("(empty)");
+        let rw = if p.writable { "rw" } else { "ro" };
+        println!("  {} = {} ({}, {})", p.path, val, p.param_type, rw);
     }
 
     Ok(())

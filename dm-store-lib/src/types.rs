@@ -106,3 +106,29 @@ impl Default for DmStoreConfig {
         DmStoreConfig { use_cache: true }
     }
 }
+
+/// Row from dm_object / dm_schema_object, as surfaced by `DmStore::dump`.
+#[derive(Debug, Clone)]
+pub struct DumpedObject {
+    pub path: String,
+    pub is_multi: bool,
+}
+
+/// Row from dm_param / dm_schema_param, as surfaced by `DmStore::dump`.
+#[derive(Debug, Clone)]
+pub struct DumpedParam {
+    pub path: String,
+    pub value: Option<String>,
+    pub param_type: String,
+    pub writable: bool,
+}
+
+/// Structured snapshot of everything in the store. Returned by `DmStore::dump`
+/// so CLIs can render without preparing their own SQL.
+#[derive(Debug, Clone, Default)]
+pub struct DmDump {
+    pub objects: Vec<DumpedObject>,
+    pub params: Vec<DumpedParam>,
+    pub schema_objects: Vec<DumpedObject>,
+    pub schema_params: Vec<DumpedParam>,
+}

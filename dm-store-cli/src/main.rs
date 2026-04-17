@@ -187,76 +187,36 @@ fn execute_command(store: &mut DmStore, cmd: &Commands) -> Result<(), DmStoreErr
 }
 
 fn dump_all(store: &DmStore) -> Result<(), DmStoreError> {
-    let conn = store.connection();
+    let dump = store.dump()?;
 
-    // Dump objects -- dm_object is all concrete, no filtering needed
     println!("=== Objects ===");
-    let mut stmt = conn.prepare("SELECT path, is_multi FROM dm_object ORDER BY path")?;
-    let rows = stmt.query_map([], |row| {
-        let path: String = row.get(0)?;
-        let is_multi: bool = row.get(1)?;
-        Ok((path, is_multi))
-    })?;
-    for row in rows {
-        let (path, is_multi) = row?;
-        let multi_str = if is_multi { " [multi]" } else { "" };
-        // Derive schema template from canonicalize
-        let canonical = dm_store_lib::path::canonicalize(&path);
-        let inst_str = if canonical != path {
+    for obj in &dump.objects {
+        let multi_str = if obj.is_multi { " [multi]" } else { "" };
+        let canonical = dm_store_lib::path::canonicalize(&obj.path);
+        let inst_str = if canonical != obj.path {
             format!(" (schema: {})", canonical)
         } else {
             String::new()
         };
-        println!("  {}{}{}", path, multi_str, inst_str);
+        println!("  {}{}{}", obj.path, multi_str, inst_str);
     }
 
-    // Dump parameters -- dm_param is all concrete, no filtering needed
     println!("\n=== Parameters ===");
-    let mut stmt =
-        conn.prepare("SELECT path, value, param_type, writable FROM dm_param ORDER BY path")?;
-    let rows = stmt.query_map([], |row| {
-        let path: String = row.get(0)?;
-        let value: Option<String> = row.get(1)?;
-        let ptype: String = row.get(2)?;
-        let writable: bool = row.get(3)?;
-        Ok((path, value, ptype, writable))
-    })?;
-    for row in rows {
-        let (path, value, ptype, writable) = row?;
-        let val = value.as_deref().unwrap_or("(empty)");
-        let rw = if writable { "rw" } else { "ro" };
-        println!("  {} = {} ({}, {})", path, val, ptype, rw);
+    for p in &dump.params {
+        let val = p.value.as_deref().unwrap_or("(empty)");
+        let rw = if p.writable { "rw" } else { "ro" };
+        println!("  {} = {} ({}, {})", p.path, val, p.param_type, rw);
     }
 
-    // Dump schema templates from dedicated schema tables
-    let mut stmt = conn.prepare("SELECT path, is_multi FROM dm_schema_object ORDER BY path")?;
-    let tmpl_objs: Vec<(String, bool)> = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut stmt =
-        conn.prepare("SELECT path, param_type, writable FROM dm_schema_param ORDER BY path")?;
-    let tmpl_params: Vec<(String, String, bool)> = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, bool>(2)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if !tmpl_objs.is_empty() || !tmpl_params.is_empty() {
+    if !dump.schema_objects.is_empty() || !dump.schema_params.is_empty() {
         println!("\n=== Schema Templates ===");
-        for (path, is_multi) in &tmpl_objs {
-            let multi_str = if *is_multi { " [multi]" } else { "" };
-            println!("  {} [template]{}", path, multi_str);
+        for obj in &dump.schema_objects {
+            let multi_str = if obj.is_multi { " [multi]" } else { "" };
+            println!("  {} [template]{}", obj.path, multi_str);
         }
-        for (path, ptype, writable) in &tmpl_params {
-            let rw = if *writable { "rw" } else { "ro" };
-            println!("  {} ({}, {})", path, ptype, rw);
+        for p in &dump.schema_params {
+            let rw = if p.writable { "rw" } else { "ro" };
+            println!("  {} ({}, {})", p.path, p.param_type, rw);
         }
     }
 

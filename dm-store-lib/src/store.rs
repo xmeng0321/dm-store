@@ -626,6 +626,50 @@ impl DmStore {
     pub fn cache_enabled(&self) -> bool {
         self.config.use_cache
     }
+
+    /// Begin a named savepoint. Intended for interactive contexts (e.g. the
+    /// REPL) that need a batch scope spanning multiple `session()` calls.
+    /// Use `release_savepoint` to commit or `rollback_savepoint` to abort.
+    pub fn begin_savepoint(&mut self, name: &str) -> Result<(), DmStoreError> {
+        // Basic guard against SQL injection via savepoint name.
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DmStoreError::InvalidPath {
+                path: name.to_string(),
+                reason: "savepoint name must be alphanumeric/underscore".to_string(),
+            });
+        }
+        self.conn.execute_batch(&format!("SAVEPOINT {}", name))?;
+        Ok(())
+    }
+
+    /// Commit a named savepoint previously opened with `begin_savepoint`.
+    pub fn release_savepoint(&mut self, name: &str) -> Result<(), DmStoreError> {
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DmStoreError::InvalidPath {
+                path: name.to_string(),
+                reason: "savepoint name must be alphanumeric/underscore".to_string(),
+            });
+        }
+        self.conn
+            .execute_batch(&format!("RELEASE SAVEPOINT {}", name))?;
+        Ok(())
+    }
+
+    /// Abort a named savepoint and reload caches so they reflect the DB.
+    pub fn rollback_savepoint(&mut self, name: &str) -> Result<(), DmStoreError> {
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DmStoreError::InvalidPath {
+                path: name.to_string(),
+                reason: "savepoint name must be alphanumeric/underscore".to_string(),
+            });
+        }
+        self.conn.execute_batch(&format!(
+            "ROLLBACK TO SAVEPOINT {0}; RELEASE SAVEPOINT {0};",
+            name
+        ))?;
+        self.reload_cache()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

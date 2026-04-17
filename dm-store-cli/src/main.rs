@@ -274,9 +274,12 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
     println!("dm-store interactive shell. Type 'help' for commands, 'quit' to exit.");
 
     let mut in_session = false;
+    const REPL_SAVEPOINT: &str = "repl_session";
 
-    // We need to manage the session manually in the REPL since Session borrows &mut store.
-    // We use raw SQL savepoints for REPL sessions.
+    // The REPL wraps its batch scope in an outer savepoint managed via
+    // DmStore::begin/release/rollback_savepoint. Each set/add/del still goes
+    // through a nested Session, so cache coherency is driven by the Session
+    // abstraction, not by raw SQL here.
     loop {
         let prompt = if in_session { "dm(session)> " } else { "dm> " };
         match rl.readline(prompt) {
@@ -294,10 +297,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                     "help" => print_repl_help(),
                     "quit" | "exit" => {
                         if in_session {
-                            let _ = store
-                                .connection()
-                                .execute_batch("ROLLBACK TO SAVEPOINT repl_session; RELEASE SAVEPOINT repl_session;");
-                            store.reload_cache()?;
+                            let _ = store.rollback_savepoint(REPL_SAVEPOINT);
                             println!("Session aborted.");
                         }
                         break;
@@ -308,7 +308,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                                 "Error: session already active. Use 'commit' or 'abort' first."
                             );
                         } else {
-                            store.connection().execute_batch("SAVEPOINT repl_session")?;
+                            store.begin_savepoint(REPL_SAVEPOINT)?;
                             in_session = true;
                             println!("Session started.");
                         }
@@ -317,9 +317,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                         if !in_session {
                             println!("Error: no active session.");
                         } else {
-                            store
-                                .connection()
-                                .execute_batch("RELEASE SAVEPOINT repl_session")?;
+                            store.release_savepoint(REPL_SAVEPOINT)?;
                             in_session = false;
                             println!("Session committed.");
                         }
@@ -328,10 +326,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                         if !in_session {
                             println!("Error: no active session.");
                         } else {
-                            store
-                                .connection()
-                                .execute_batch("ROLLBACK TO SAVEPOINT repl_session; RELEASE SAVEPOINT repl_session;")?;
-                            store.reload_cache()?;
+                            store.rollback_savepoint(REPL_SAVEPOINT)?;
                             in_session = false;
                             println!("Session aborted.");
                         }
@@ -368,25 +363,11 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                         if parts.len() < 3 {
                             println!("Usage: set <path> <value>");
                         } else {
-                            // For REPL set, use direct SQL if in session, or a mini-session
                             let path = parts[1];
                             let value = parts[2..].join(" ");
-                            if in_session {
-                                match repl_set(store, path, &value) {
-                                    Ok(()) => println!("OK"),
-                                    Err(e) => println!("Error: {}", e),
-                                }
-                            } else {
-                                let mut session = store.session()?;
-                                match session.set(path, &value) {
-                                    Ok(()) => {
-                                        session.commit()?;
-                                        println!("OK");
-                                    }
-                                    Err(e) => {
-                                        println!("Error: {}", e);
-                                    }
-                                }
+                            match repl_set(store, path, &value) {
+                                Ok(()) => println!("OK"),
+                                Err(e) => println!("Error: {}", e),
                             }
                         }
                     }
@@ -414,7 +395,6 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
                             match session.delete(parts[1]) {
                                 Ok(()) => {
                                     session.commit()?;
-                                    store.reload_cache()?;
                                     println!("Deleted {}", parts[1]);
                                 }
                                 Err(e) => {
@@ -504,10 +484,7 @@ fn run_repl(store: &mut DmStore) -> Result<(), DmStoreError> {
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 if in_session {
-                    let _ = store.connection().execute_batch(
-                        "ROLLBACK TO SAVEPOINT repl_session; RELEASE SAVEPOINT repl_session;",
-                    );
-                    store.reload_cache()?;
+                    let _ = store.rollback_savepoint(REPL_SAVEPOINT);
                     println!("\nSession aborted.");
                 }
                 break;

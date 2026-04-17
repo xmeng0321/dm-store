@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
-use crate::error::DmStoreError;
+use crate::error::{DmStoreError, ResultExt};
 use crate::path::{self, fnv1a_hash};
 use crate::schema;
 use crate::session::Session;
@@ -27,13 +27,13 @@ impl DmStore {
 
     /// Open with explicit config.
     pub fn open_with_config(db_path: &str, config: DmStoreConfig) -> Result<Self, DmStoreError> {
-        let conn = Connection::open(db_path)?;
+        let conn = Connection::open(db_path).ctx_with(|| format!("opening database {}", db_path))?;
         Self::init(conn, config)
     }
 
     /// Open an in-memory database (for testing).
     pub fn open_in_memory() -> Result<Self, DmStoreError> {
-        let conn = Connection::open_in_memory()?;
+        let conn = Connection::open_in_memory().ctx("opening in-memory database")?;
         Self::init(conn, DmStoreConfig::default())
     }
 
@@ -65,19 +65,22 @@ impl DmStore {
         conn: &Connection,
     ) -> Result<HashMap<i64, Vec<Parameter>>, DmStoreError> {
         let mut map: HashMap<i64, Vec<Parameter>> = HashMap::new();
-        let mut stmt =
-            conn.prepare("SELECT path, path_hash, value, param_type, writable FROM dm_param")?;
-        let rows = stmt.query_map([], |row| {
-            let path: String = row.get(0)?;
-            let hash: i64 = row.get(1)?;
-            let value: Option<String> = row.get(2)?;
-            let type_str: String = row.get(3)?;
-            let writable: bool = row.get(4)?;
-            Ok((path, hash, value, type_str, writable))
-        })?;
+        let mut stmt = conn
+            .prepare("SELECT path, path_hash, value, param_type, writable FROM dm_param")
+            .ctx("preparing load_cache query")?;
+        let rows = stmt
+            .query_map([], |row| {
+                let path: String = row.get(0)?;
+                let hash: i64 = row.get(1)?;
+                let value: Option<String> = row.get(2)?;
+                let type_str: String = row.get(3)?;
+                let writable: bool = row.get(4)?;
+                Ok((path, hash, value, type_str, writable))
+            })
+            .ctx("executing load_cache query")?;
 
         for row in rows {
-            let (path, hash, value, type_str, writable) = row?;
+            let (path, hash, value, type_str, writable) = row.ctx("reading load_cache row")?;
             let param_type = ParamType::parse_name(&type_str).unwrap_or(ParamType::String);
             let param = Parameter {
                 path,
@@ -104,16 +107,19 @@ impl DmStore {
         conn: &Connection,
     ) -> Result<HashMap<String, Vec<u32>>, DmStoreError> {
         let mut map: HashMap<String, Vec<u32>> = HashMap::new();
-        let mut stmt =
-            conn.prepare("SELECT parent_path, path FROM dm_object WHERE parent_path IS NOT NULL")?;
-        let rows = stmt.query_map([], |row| {
-            let parent: String = row.get(0)?;
-            let child: String = row.get(1)?;
-            Ok((parent, child))
-        })?;
+        let mut stmt = conn
+            .prepare("SELECT parent_path, path FROM dm_object WHERE parent_path IS NOT NULL")
+            .ctx("preparing load_instance_cache query")?;
+        let rows = stmt
+            .query_map([], |row| {
+                let parent: String = row.get(0)?;
+                let child: String = row.get(1)?;
+                Ok((parent, child))
+            })
+            .ctx("executing load_instance_cache query")?;
 
         for row in rows {
-            let (parent, child) = row?;
+            let (parent, child) = row.ctx("reading load_instance_cache row")?;
             if let Ok(num) = path::leaf_name(&child).parse::<u32>() {
                 map.entry(parent).or_default().push(num);
             }
@@ -713,7 +719,9 @@ impl DmStore {
                 reason: "savepoint name must be alphanumeric/underscore".to_string(),
             });
         }
-        self.conn.execute_batch(&format!("SAVEPOINT {}", name))?;
+        self.conn
+            .execute_batch(&format!("SAVEPOINT {}", name))
+            .ctx_with(|| format!("opening savepoint {}", name))?;
         Ok(())
     }
 
@@ -726,7 +734,8 @@ impl DmStore {
             });
         }
         self.conn
-            .execute_batch(&format!("RELEASE SAVEPOINT {}", name))?;
+            .execute_batch(&format!("RELEASE SAVEPOINT {}", name))
+            .ctx_with(|| format!("releasing savepoint {}", name))?;
         Ok(())
     }
 
@@ -738,10 +747,12 @@ impl DmStore {
                 reason: "savepoint name must be alphanumeric/underscore".to_string(),
             });
         }
-        self.conn.execute_batch(&format!(
-            "ROLLBACK TO SAVEPOINT {0}; RELEASE SAVEPOINT {0};",
-            name
-        ))?;
+        self.conn
+            .execute_batch(&format!(
+                "ROLLBACK TO SAVEPOINT {0}; RELEASE SAVEPOINT {0};",
+                name
+            ))
+            .ctx_with(|| format!("rolling back savepoint {}", name))?;
         self.reload_cache()?;
         Ok(())
     }

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::error::DmStoreError;
+use crate::error::{DmStoreError, ResultExt};
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS dm_object (
@@ -62,9 +62,11 @@ pub fn init_db(conn: &Connection) -> Result<(), DmStoreError> {
          PRAGMA synchronous = NORMAL;
          PRAGMA foreign_keys = ON;
          PRAGMA cache_size = -8000;",
-    )?;
+    )
+    .ctx("applying database pragmas")?;
 
-    conn.execute_batch(SCHEMA_SQL)?;
+    conn.execute_batch(SCHEMA_SQL)
+        .ctx("creating schema tables")?;
 
     Ok(())
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
-use crate::error::DmStoreError;
+use crate::error::{DmStoreError, ResultExt};
 use crate::path::{self, fnv1a_hash};
 use crate::store::DmStore;
 use crate::types::*;
@@ -22,7 +22,8 @@ impl<'a> Session<'a> {
         instance_cache: &'a mut Option<HashMap<String, Vec<u32>>>,
         savepoint_name: String,
     ) -> Result<Self, DmStoreError> {
-        conn.execute_batch(&format!("SAVEPOINT {}", savepoint_name))?;
+        conn.execute_batch(&format!("SAVEPOINT {}", savepoint_name))
+            .ctx_with(|| format!("opening session savepoint {}", savepoint_name))?;
         Ok(Session {
             conn,
             cache,
@@ -466,7 +467,8 @@ impl<'a> Session<'a> {
     pub fn commit(mut self) -> Result<(), DmStoreError> {
         self.check_open()?;
         self.conn
-            .execute_batch(&format!("RELEASE SAVEPOINT {}", self.savepoint_name))?;
+            .execute_batch(&format!("RELEASE SAVEPOINT {}", self.savepoint_name))
+            .ctx_with(|| format!("committing session savepoint {}", self.savepoint_name))?;
         self.closed = true;
         Ok(())
     }
@@ -479,10 +481,12 @@ impl<'a> Session<'a> {
     }
 
     fn do_rollback(&mut self) -> Result<(), DmStoreError> {
-        self.conn.execute_batch(&format!(
-            "ROLLBACK TO SAVEPOINT {0}; RELEASE SAVEPOINT {0};",
-            self.savepoint_name
-        ))?;
+        self.conn
+            .execute_batch(&format!(
+                "ROLLBACK TO SAVEPOINT {0}; RELEASE SAVEPOINT {0};",
+                self.savepoint_name
+            ))
+            .ctx_with(|| format!("rolling back session savepoint {}", self.savepoint_name))?;
         self.closed = true;
         self.refresh_caches_from_db()?;
         Ok(())

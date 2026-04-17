@@ -332,13 +332,28 @@ fn dump_all(mgr: &DmManager) -> Result<(), DmManagerError> {
 
 // --- REPL with auto-completion ---
 
+const REPL_COMMANDS: &[&str] = &[
+    "load",
+    "get",
+    "set",
+    "add",
+    "del",
+    "instances",
+    "schema",
+    "list-schema",
+    "dump",
+    "begin",
+    "commit",
+    "abort",
+    "help",
+    "quit",
+];
+
 struct DmHelper {
     /// Sorted list of all schema template paths for completion.
     schema_paths: Vec<String>,
     /// Expanded concrete paths (template paths with {i} replaced by real instance numbers).
     concrete_paths: Vec<String>,
-    /// REPL command names.
-    commands: Vec<String>,
 }
 
 impl DmHelper {
@@ -346,22 +361,6 @@ impl DmHelper {
         DmHelper {
             schema_paths: Vec::new(),
             concrete_paths: Vec::new(),
-            commands: vec![
-                "load".to_string(),
-                "get".to_string(),
-                "set".to_string(),
-                "add".to_string(),
-                "del".to_string(),
-                "instances".to_string(),
-                "schema".to_string(),
-                "list-schema".to_string(),
-                "dump".to_string(),
-                "begin".to_string(),
-                "commit".to_string(),
-                "abort".to_string(),
-                "help".to_string(),
-                "quit".to_string(),
-            ],
         }
     }
 
@@ -442,13 +441,12 @@ impl Completer for DmHelper {
         if parts.is_empty() || (parts.len() == 1 && !line_up_to.ends_with(' ')) {
             // Completing command name
             let prefix = parts.first().copied().unwrap_or("");
-            let matches: Vec<Pair> = self
-                .commands
+            let matches: Vec<Pair> = REPL_COMMANDS
                 .iter()
                 .filter(|c| c.starts_with(prefix))
                 .map(|c| Pair {
-                    display: c.clone(),
-                    replacement: c.clone(),
+                    display: (*c).to_string(),
+                    replacement: (*c).to_string(),
                 })
                 .collect();
             let start = pos - prefix.len();

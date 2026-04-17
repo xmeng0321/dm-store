@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dm-store-shell",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "--bin", "dm-store", "--", "shell"],
+      "port": 0
+    },
+    {
+      "name": "dm-store-tests",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["test"],
+      "port": 0
+    },
+    {
+      "name": "dm-store-build-release",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["build", "--release"],
+      "port": 0
+    }
+  ]
+}

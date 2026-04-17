@@ -650,6 +650,67 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_delete_invalidates_caches() {
+        let mut store = DmStore::open_in_memory().unwrap();
+        store.define_object("Device.", false).unwrap();
+        store.define_object("Device.WiFi.", true).unwrap();
+        store.define_object("Device.WiFi.{i}.", false).unwrap();
+        store.define_object("Device.WiFi.{i}.SSID.", true).unwrap();
+        store
+            .define_object("Device.WiFi.{i}.SSID.{i}.", false)
+            .unwrap();
+        store
+            .define_parameter(
+                "Device.WiFi.{i}.SSID.{i}.Name",
+                ParamType::String,
+                true,
+                Some("ssid"),
+            )
+            .unwrap();
+
+        // Create WiFi.1 with SSID.1 and SSID.2
+        {
+            let mut s = store.session().unwrap();
+            s.add("Device.WiFi.").unwrap();
+            s.add("Device.WiFi.1.SSID.").unwrap();
+            s.add("Device.WiFi.1.SSID.").unwrap();
+            s.commit().unwrap();
+        }
+        assert_eq!(store.instances("Device.WiFi.1.SSID.").unwrap(), vec![1, 2]);
+
+        // Delete the nested SSID.1
+        {
+            let mut s = store.session().unwrap();
+            s.delete("Device.WiFi.1.SSID.1.").unwrap();
+            s.commit().unwrap();
+        }
+
+        // Instance cache must reflect removal: SSID has [2], WiFi still has [1]
+        assert_eq!(store.instances("Device.WiFi.1.SSID.").unwrap(), vec![2]);
+        assert_eq!(store.instances("Device.WiFi.").unwrap(), vec![1]);
+
+        // Param cache must no longer serve the deleted param
+        let r = store.get("Device.WiFi.1.SSID.1.Name");
+        assert!(matches!(r, Err(DmStoreError::NotFound(_))));
+
+        // Sibling survives
+        let p = store.get("Device.WiFi.1.SSID.2.Name").unwrap();
+        assert_eq!(p.value.as_deref(), Some("ssid"));
+
+        // Delete the whole WiFi.1 -- must drop the nested table icache entry too
+        {
+            let mut s = store.session().unwrap();
+            s.delete("Device.WiFi.1.").unwrap();
+            s.commit().unwrap();
+        }
+        assert!(store
+            .instances("Device.WiFi.1.SSID.")
+            .unwrap()
+            .is_empty());
+        assert!(store.instances("Device.WiFi.").unwrap().is_empty());
+    }
+
+    #[test]
     fn test_session_read_only_param() {
         let mut store = DmStore::open_in_memory().unwrap();
         store.define_object("Device.", false).unwrap();

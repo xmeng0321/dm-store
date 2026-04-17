@@ -382,11 +382,13 @@ impl DmHelper {
     /// Rebuild concrete paths by expanding {i} in schema paths using real instance numbers.
     fn refresh_concrete_paths(&mut self, mgr: &DmManager) {
         let mut concrete = Vec::new();
+        let mut cache: std::collections::HashMap<String, Vec<u32>> =
+            std::collections::HashMap::new();
         for tmpl in &self.schema_paths {
             if !tmpl.contains("{i}") {
                 concrete.push(tmpl.clone());
             } else {
-                expand_template(mgr, tmpl, &mut concrete);
+                expand_template(mgr, tmpl, &mut concrete, &mut cache);
             }
         }
         concrete.sort();
@@ -395,30 +397,41 @@ impl DmHelper {
     }
 }
 
-/// Recursively expand {i} placeholders in a template path using real instances.
-fn expand_template(mgr: &DmManager, template: &str, out: &mut Vec<String>) {
-    // Find the first {i} and get the table path up to it
-    let Some(pos) = template.find("{i}") else {
-        out.push(template.to_string());
-        return;
-    };
+/// Iteratively expand {i} placeholders using real instances. A worklist
+/// drives expansion one `{i}` at a time; `cache` memoises `mgr.instances`
+/// calls so deeply nested templates don't rescan the store for every
+/// candidate prefix.
+fn expand_template(
+    mgr: &DmManager,
+    template: &str,
+    out: &mut Vec<String>,
+    cache: &mut std::collections::HashMap<String, Vec<u32>>,
+) {
+    let mut worklist: Vec<String> = vec![template.to_string()];
+    while let Some(current) = worklist.pop() {
+        let Some(pos) = current.find("{i}") else {
+            out.push(current);
+            continue;
+        };
 
-    let table_path = &template[..pos]; // e.g. "Device.Bridging.Bridge."
-    let after = &template[pos + 3..]; // e.g. ".Enable" or ".Port.{i}.Status"
+        let table_path = &current[..pos];
+        let after = &current[pos + 3..];
 
-    // table_path might itself contain {i} that was already expanded in a previous call,
-    // so query instances directly
-    let nums = match mgr.instances(table_path) {
-        Ok(n) => n,
-        Err(_) => return,
-    };
+        let nums: &Vec<u32> = match cache.get(table_path) {
+            Some(v) => v,
+            None => {
+                let fetched = mgr.instances(table_path).unwrap_or_default();
+                cache.entry(table_path.to_string()).or_insert(fetched)
+            }
+        };
 
-    for num in nums {
-        let expanded = format!("{}{}{}", table_path, num, after);
-        if expanded.contains("{i}") {
-            expand_template(mgr, &expanded, out);
-        } else {
-            out.push(expanded);
+        for num in nums {
+            let expanded = format!("{}{}{}", table_path, num, after);
+            if expanded.contains("{i}") {
+                worklist.push(expanded);
+            } else {
+                out.push(expanded);
+            }
         }
     }
 }

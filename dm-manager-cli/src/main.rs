@@ -268,7 +268,10 @@ fn show_schema(mgr: &DmManager, path: &str) {
 fn dump_all(mgr: &DmManager) -> Result<(), DmManagerError> {
     println!("=== Schema Objects ===");
     for path in mgr.schema().object_paths() {
-        let os = mgr.object_schema(path).unwrap();
+        let Some(os) = mgr.object_schema(path) else {
+            log::warn!("schema object listed but not resolvable: {}", path);
+            continue;
+        };
         let flags: Vec<&str> = [
             if os.is_template {
                 Some("template")
@@ -290,7 +293,10 @@ fn dump_all(mgr: &DmManager) -> Result<(), DmManagerError> {
 
     println!("\n=== Schema Parameters ===");
     for path in mgr.schema().param_paths() {
-        let ps = mgr.param_schema(path).unwrap();
+        let Some(ps) = mgr.param_schema(path) else {
+            log::warn!("schema parameter listed but not resolvable: {}", path);
+            continue;
+        };
         let rw = if ps.access == Access::ReadWrite {
             "rw"
         } else {

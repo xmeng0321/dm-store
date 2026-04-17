@@ -11,4 +11,5 @@ path = "src/main.rs"
 dm-manager-lib = { path = "../dm-manager-lib" }
 dm-store-lib = { path = "../dm-store-lib" }
 clap = { version = "4", features = ["derive"] }
+log = "0.4"
 rustyline = "15"

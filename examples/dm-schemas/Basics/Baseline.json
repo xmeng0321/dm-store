@@ -1,0 +1,28 @@
+[
+    {
+        "object": "Device.",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "RootDataModelVersion",
+                "access": "readOnly",
+                "dataType": "string(:32)",
+                "const": "2.5"
+            }
+        ],
+        "commands": [
+            {
+                "name": "Reboot()",
+                "async": false,
+                "input": [],
+                "output": []
+            },
+            {
+                "name": "FactoryReset()",
+                "async": false,
+                "input": [],
+                "output": []
+            }
+        ]
+    }
+]

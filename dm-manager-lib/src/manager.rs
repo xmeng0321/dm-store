@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dm_store_lib::path::{self, canonicalize};
 use dm_store_lib::{AddResult, DmStore, DmStoreError, Parameter};
 
 use crate::error::DmManagerError;
+use crate::js::{path_to_ident, BridgeDb, JsHandlers};
 use crate::loader;
 use crate::schema::{Access, DmSchema, ParamSchema};
 use crate::validate;
@@ -22,13 +23,15 @@ enum ObjectAvailability {
     HookDerived,
 }
 
-fn resolve_object_availability<F>(
+fn resolve_object_availability<F, G>(
     instance_hooks: &HashMap<String, InstanceHook>,
+    js_instances: &G,
     object_exists: &F,
     object_path: &str,
 ) -> Result<Option<ObjectAvailability>, DmManagerError>
 where
     F: Fn(&str) -> Result<bool, DmManagerError>,
+    G: Fn(&str) -> Result<Option<Vec<u32>>, DmManagerError>,
 {
     if object_exists(object_path)? {
         return Ok(Some(ObjectAvailability::Stored));
@@ -50,10 +53,16 @@ where
                 .any(|num| num == instance_number)
                 .then_some(ObjectAvailability::HookDerived));
         }
+        if let Some(instances) = js_instances(&parent)? {
+            return Ok(instances
+                .into_iter()
+                .any(|num| num == instance_number)
+                .then_some(ObjectAvailability::HookDerived));
+        }
         return Ok(None);
     }
 
-    match resolve_object_availability(instance_hooks, object_exists, &parent)? {
+    match resolve_object_availability(instance_hooks, js_instances, object_exists, &parent)? {
         Some(ObjectAvailability::HookDerived) => Ok(Some(ObjectAvailability::HookDerived)),
         Some(ObjectAvailability::Stored) | None => Ok(None),
     }
@@ -65,6 +74,8 @@ pub struct DmManager {
     store: DmStore,
     read_hooks: HashMap<String, ReadHook>,
     instance_hooks: HashMap<String, InstanceHook>,
+    js: Option<JsHandlers>,
+    registered_folders: HashSet<String>,
 }
 
 impl DmManager {
@@ -75,6 +86,8 @@ impl DmManager {
             store,
             read_hooks: HashMap::new(),
             instance_hooks: HashMap::new(),
+            js: None,
+            registered_folders: HashSet::new(),
         }
     }
 
@@ -94,6 +107,54 @@ impl DmManager {
     /// Load schema from a JSON string.
     pub fn load_schema_str(&mut self, json: &str) -> Result<(), DmManagerError> {
         loader::load_schema_str(json, &mut self.schema, &mut self.store)
+    }
+
+    // --- JS handler access (used by folder loader) ---
+
+    /// Lazily create the JS runtime/context if not already initialised.
+    pub fn ensure_js(&mut self) -> Result<(), DmManagerError> {
+        if self.js.is_none() {
+            self.js = Some(JsHandlers::new()?);
+        }
+        Ok(())
+    }
+
+    /// Borrow the JS handler registry, if initialised.
+    pub fn js(&self) -> Option<&JsHandlers> {
+        self.js.as_ref()
+    }
+
+    /// Mutably borrow the JS handler registry, if initialised.
+    pub fn js_mut(&mut self) -> Option<&mut JsHandlers> {
+        self.js.as_mut()
+    }
+
+    /// Record a sub-folder as registered. Returns `true` if this is the first
+    /// registration (i.e. the caller should invoke `DM_Init`).
+    pub(crate) fn mark_folder_registered(&mut self, folder_name: &str) -> bool {
+        self.registered_folders.insert(folder_name.to_string())
+    }
+
+    /// Returns `true` if the given sub-folder has already been registered
+    /// (and should be skipped by the folder loader on subsequent calls).
+    pub(crate) fn is_folder_registered(&self, folder_name: &str) -> bool {
+        self.registered_folders.contains(folder_name)
+    }
+
+    /// Invoke `DM_Init()` (if defined) with a writable session exposed via
+    /// `DM.*`, committing on success. No-op if no `DM_Init` is defined.
+    pub(crate) fn run_init_with_write_session(&mut self) -> Result<(), DmManagerError> {
+        // Split-borrow: `self.js` and `self.store` are disjoint fields.
+        let Some(js) = self.js.as_ref() else {
+            return Ok(());
+        };
+        if !js.has_function("DM_Init") {
+            return Ok(());
+        }
+        let mut session = self.store.session()?;
+        js.call_init_if_present(BridgeDb::SessionWrite(&mut session))?;
+        session.commit()?;
+        Ok(())
     }
 
     // --- Schema query ---
@@ -182,8 +243,9 @@ impl DmManager {
     /// Resolution order:
     /// 1. Validate path exists in schema
     /// 2. const_value -> return directly
-    /// 3. Writable -> dm-store first, then schema default
-    /// 4. Read-only -> registered hook, then default callback (schema default/const/empty)
+    /// 3. JS `DM_Getter_*` handler if defined
+    /// 4. Writable -> dm-store first, then schema default
+    /// 5. Read-only -> registered Rust hook, then default callback
     pub fn get(&self, path_str: &str) -> Result<Parameter, DmManagerError> {
         let ps = self.resolve_param_schema(path_str)?;
         let object_path = path::parent_path(path_str)
@@ -197,6 +259,18 @@ impl DmManager {
                 value: Some(val.clone()),
                 param_type: ps.param_type,
                 writable: false,
+            });
+        }
+
+        // JS getter handler: takes precedence over Rust hooks and the DB.
+        if let Some(val) =
+            try_call_js_getter(self.js.as_ref(), path_str, BridgeDb::Store(&self.store))?
+        {
+            return Ok(Parameter {
+                path: path_str.to_string(),
+                value: Some(val),
+                param_type: ps.param_type,
+                writable: ps.access == Access::ReadWrite,
             });
         }
 
@@ -289,7 +363,8 @@ impl DmManager {
     }
 
     /// Get instance numbers for a multi-instance object.
-    /// Checks instance hook first (if registered), then dm-store.
+    ///
+    /// Resolution order: JS `DM_Instances_*` handler -> registered Rust hook -> dm-store.
     pub fn instances(&self, table_path: &str) -> Result<Vec<u32>, DmManagerError> {
         if !path::is_object_path(table_path) {
             return Err(DmManagerError::NotInSchema(format!(
@@ -298,13 +373,18 @@ impl DmManager {
             )));
         }
 
+        // JS instances handler wins.
+        if let Some(nums) =
+            try_call_js_instances(self.js.as_ref(), table_path, BridgeDb::Store(&self.store))?
+        {
+            return Ok(nums);
+        }
+
         let template = canonicalize(table_path);
-        // Check for instance hook
         if let Some(hook) = self.instance_hooks.get(&template) {
             return hook(table_path);
         }
 
-        // Default: delegate to dm-store
         self.store.instances(table_path).map_err(|e| e.into())
     }
 
@@ -318,6 +398,7 @@ impl DmManager {
             store_session: session,
             read_hooks: &self.read_hooks,
             instance_hooks: &self.instance_hooks,
+            js: self.js.as_ref(),
         })
     }
 
@@ -355,6 +436,9 @@ impl DmManager {
 
         let availability = resolve_object_availability(
             &self.instance_hooks,
+            &|table_path: &str| {
+                try_call_js_instances(self.js.as_ref(), table_path, BridgeDb::Store(&self.store))
+            },
             &|path| {
                 self.store
                     .object_exists(path)
@@ -377,6 +461,7 @@ pub struct DmManagerSession<'a> {
     store_session: dm_store_lib::session::Session<'a>,
     read_hooks: &'a HashMap<String, ReadHook>,
     instance_hooks: &'a HashMap<String, InstanceHook>,
+    js: Option<&'a JsHandlers>,
 }
 
 impl<'a> DmManagerSession<'a> {
@@ -385,7 +470,8 @@ impl<'a> DmManagerSession<'a> {
     /// 1. Validate path exists in schema
     /// 2. Check if writable
     /// 3. Validate value against type/constraints
-    /// 4. Delegate to dm-store session
+    /// 4. JS `DM_Setter_*` handler if defined (replaces DB write)
+    /// 5. Otherwise delegate to dm-store session
     pub fn set(&mut self, path_str: &str, value: &str) -> Result<(), DmManagerError> {
         let ps = self
             .schema
@@ -396,10 +482,27 @@ impl<'a> DmManagerSession<'a> {
             return Err(DmManagerError::ReadOnly(path_str.to_string()));
         }
 
-        // Validate value against schema constraints
+        // Validate value against schema constraints.
         validate::validate_value(value, ps)?;
 
-        // Delegate to dm-store
+        // JS setter handler takes precedence over the DB.
+        if let Some(result) = try_call_js_setter(
+            self.js,
+            path_str,
+            value,
+            BridgeDb::SessionWrite(&mut self.store_session),
+        )? {
+            return if result {
+                Ok(())
+            } else {
+                Err(DmManagerError::HookError {
+                    path: path_str.to_string(),
+                    reason: "setter returned false".to_string(),
+                })
+            };
+        }
+
+        // Delegate to dm-store.
         self.store_session
             .set(path_str, value)
             .map_err(|e| match e {
@@ -415,9 +518,9 @@ impl<'a> DmManagerSession<'a> {
         }
         self.ensure_mutable_table(table_path)?;
 
-        // Check if an instance hook is registered - if so, instances are externally managed
+        // Instance hook (Rust or JS) implies externally-managed instances.
         let template = canonicalize(table_path);
-        if self.instance_hooks.contains_key(&template) {
+        if self.instance_hooks.contains_key(&template) || has_js_instances(self.js, table_path) {
             return Err(DmManagerError::Schema(format!(
                 "cannot add instance: {} has an instance hook (externally managed)",
                 table_path
@@ -433,9 +536,8 @@ impl<'a> DmManagerSession<'a> {
             .ok_or_else(|| DmManagerError::NotMultiInstance(instance_path.to_string()))?;
         self.ensure_mutable_table(&parent)?;
 
-        // Check if instance hook is registered for the parent table
         let template = canonicalize(&parent);
-        if self.instance_hooks.contains_key(&template) {
+        if self.instance_hooks.contains_key(&template) || has_js_instances(self.js, &parent) {
             return Err(DmManagerError::Schema(format!(
                 "cannot delete instance: {} has an instance hook (externally managed)",
                 parent
@@ -463,6 +565,17 @@ impl<'a> DmManagerSession<'a> {
                 value: Some(val.clone()),
                 param_type: ps.param_type,
                 writable: false,
+            });
+        }
+
+        if let Some(val) =
+            try_call_js_getter(self.js, path_str, BridgeDb::SessionRead(&self.store_session))?
+        {
+            return Ok(Parameter {
+                path: path_str.to_string(),
+                value: Some(val),
+                param_type: ps.param_type,
+                writable: ps.access == Access::ReadWrite,
             });
         }
 
@@ -546,6 +659,13 @@ impl<'a> DmManagerSession<'a> {
 
     /// Get instances within session context.
     pub fn instances(&self, table_path: &str) -> Result<Vec<u32>, DmManagerError> {
+        if let Some(nums) = try_call_js_instances(
+            self.js,
+            table_path,
+            BridgeDb::SessionRead(&self.store_session),
+        )? {
+            return Ok(nums);
+        }
         let template = canonicalize(table_path);
         if let Some(hook) = self.instance_hooks.get(&template) {
             return hook(table_path);
@@ -576,6 +696,13 @@ impl<'a> DmManagerSession<'a> {
 
         let availability = resolve_object_availability(
             self.instance_hooks,
+            &|table_path: &str| {
+                try_call_js_instances(
+                    self.js,
+                    table_path,
+                    BridgeDb::SessionRead(&self.store_session),
+                )
+            },
             &|path| {
                 self.store_session
                     .object_exists(path)
@@ -607,6 +734,82 @@ impl<'a> DmManagerSession<'a> {
 
         Ok(())
     }
+}
+
+// --- JS dispatch helpers (shared between DmManager and DmManagerSession) ---
+
+fn instance_numbers_for(path_str: &str) -> Vec<u32> {
+    path::extract_instance_numbers(path_str)
+        .iter()
+        .filter_map(|s| s.parse::<u32>().ok())
+        .collect()
+}
+
+fn try_call_js_getter(
+    js: Option<&JsHandlers>,
+    path_str: &str,
+    db: BridgeDb<'_, '_>,
+) -> Result<Option<String>, DmManagerError> {
+    let Some(js) = js else { return Ok(None) };
+    let template = canonicalize(path_str);
+    let name = format!("DM_Getter_{}", path_to_ident(&template));
+    if !js.has_function(&name) {
+        return Ok(None);
+    }
+    let instances = instance_numbers_for(path_str);
+    match js.call_getter(&name, &instances, db)? {
+        Some(s) => Ok(Some(s)),
+        None => Err(DmManagerError::HookError {
+            path: path_str.to_string(),
+            reason: "getter returned undefined/null".to_string(),
+        }),
+    }
+}
+
+fn try_call_js_setter(
+    js: Option<&JsHandlers>,
+    path_str: &str,
+    value: &str,
+    db: BridgeDb<'_, '_>,
+) -> Result<Option<bool>, DmManagerError> {
+    let Some(js) = js else { return Ok(None) };
+    let template = canonicalize(path_str);
+    let name = format!("DM_Setter_{}", path_to_ident(&template));
+    if !js.has_function(&name) {
+        return Ok(None);
+    }
+    let instances = instance_numbers_for(path_str);
+    Ok(Some(js.call_setter(&name, &instances, value, db)?))
+}
+
+fn try_call_js_instances(
+    js: Option<&JsHandlers>,
+    table_path: &str,
+    db: BridgeDb<'_, '_>,
+) -> Result<Option<Vec<u32>>, DmManagerError> {
+    let Some(js) = js else { return Ok(None) };
+    let template = canonicalize(table_path);
+    let name = format!("DM_Instances_{}", path_to_ident(&template));
+    if !js.has_function(&name) {
+        return Ok(None);
+    }
+    // Parent instances in the pathname, excluding the last (which is what the
+    // handler is enumerating).
+    let parents = instance_numbers_for(table_path);
+    match js.call_instances(&name, &parents, db)? {
+        Some(nums) => Ok(Some(nums)),
+        None => Err(DmManagerError::HookError {
+            path: table_path.to_string(),
+            reason: "instances handler returned undefined/null".to_string(),
+        }),
+    }
+}
+
+fn has_js_instances(js: Option<&JsHandlers>, table_path: &str) -> bool {
+    let Some(js) = js else { return false };
+    let template = canonicalize(table_path);
+    let name = format!("DM_Instances_{}", path_to_ident(&template));
+    js.has_function(&name)
 }
 
 #[cfg(test)]

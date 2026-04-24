@@ -1,0 +1,112 @@
+[
+    {
+        "object": "Device.Hosts.",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "HostNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            }
+        ]
+    },
+    {
+        "object": "Device.Hosts.Host.{i}.",
+        "uniqueKeys": "PhysAddress",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "PhysAddress",
+                "access": "readOnly",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "IPAddress",
+                "access": "readOnly",
+                "dataType": "IPAddress"
+            },
+            {
+                "name": "DHCPClient",
+                "access": "readOnly",
+                "dataType": "pathRef[]"
+            },
+            {
+                "name": "AssociatedDevice",
+                "access": "readOnly",
+                "dataType": "pathRef"
+            },
+            {
+                "name": "Layer1Interface",
+                "access": "readOnly",
+                "dataType": "pathRef"
+            },
+            {
+                "name": "Layer3Interface",
+                "access": "readOnly",
+                "dataType": "pathRef",
+                "pathRef": [
+                    "Device.IP.Interface."
+                ]
+            },
+            {
+                "name": "InterfaceType",
+                "access": "readOnly",
+                "dataType": "enum",
+                "enum": [
+                    "Ethernet",
+                    "G.hn",
+                    "HPNA",
+                    "HomePlug",
+                    "MoCA",
+                    "UPA",
+                    "Wi-Fi",
+                    "Other"
+                ]
+            },
+            {
+                "name": "HostName",
+                "access": "readOnly",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "Active",
+                "access": "readOnly",
+                "dataType": "boolean"
+            },
+            {
+                "name": "IPv4AddressNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            },
+            {
+                "name": "IPv6AddressNumberOfEntries",
+                "access": "readOnly",
+                "dataType": "unsignedInt"
+            }
+        ]
+    },
+    {
+        "object": "Device.Hosts.Host.{i}.IPv4Address.{i}.",
+        "uniqueKeys": "IPAddress",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "IPAddress",
+                "access": "readOnly",
+                "dataType": "IPv4Address"
+            }
+        ]
+    },
+    {
+        "object": "Device.Hosts.Host.{i}.IPv6Address.{i}.",
+        "uniqueKeys": "IPAddress",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "IPAddress",
+                "access": "readOnly",
+                "dataType": "IPv6Address"
+            }
+        ]
+    }
+]

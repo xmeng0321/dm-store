@@ -169,6 +169,7 @@ fn map_base_type(base: &str) -> Result<ParamType, DmManagerError> {
         "pathRef" => Ok(ParamType::String),
         "StatsCounter32" => Ok(ParamType::UnsignedInt),
         "StatsCounter64" => Ok(ParamType::UnsignedLong),
+        "IPAddress" | "IPv4Address" | "IPv6Address" | "MACAddress" => Ok(ParamType::String),
         _ => Err(DmManagerError::Schema(format!(
             "unknown data type: {}",
             base

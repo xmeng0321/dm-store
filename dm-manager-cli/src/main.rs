@@ -19,6 +19,16 @@ struct Cli {
     #[arg(short, long)]
     schema: Vec<String>,
 
+    /// Default loading directory. Each immediate sub-folder is loaded
+    /// (schemas + handlers/*.js). The path is optional — if it doesn't
+    /// exist, loading is skipped silently.
+    #[arg(long, default_value = "examples/dm-schemas")]
+    default_folder: String,
+
+    /// Skip auto-loading `--default-folder`.
+    #[arg(long)]
+    no_default: bool,
+
     /// Disable in-memory cache
     #[arg(long)]
     no_cache: bool,
@@ -91,16 +101,36 @@ fn main() {
 
     let mut mgr = DmManager::new(store);
 
+    // Auto-load the default folder if it exists.
+    let mut loaded_anything = false;
+    if !cli.no_default {
+        let default_dir = std::path::Path::new(&cli.default_folder);
+        if default_dir.is_dir() {
+            if let Err(e) = mgr.load_default_folder(default_dir) {
+                eprintln!(
+                    "Error loading default folder {}: {}",
+                    default_dir.display(),
+                    e
+                );
+                std::process::exit(1);
+            }
+            loaded_anything = true;
+        }
+    }
+
     // Load schema files specified with --schema
     for schema_path in &cli.schema {
         if let Err(e) = mgr.load_schema_file(schema_path) {
             eprintln!("Error loading schema {}: {}", schema_path, e);
             std::process::exit(1);
         }
+        loaded_anything = true;
     }
 
-    // Register default read hooks for read-only params without const/default
-    if !cli.schema.is_empty() {
+    // Register default read hooks for read-only params without const/default.
+    // JS handlers take precedence over these, so it's safe to always do this
+    // when any schema was loaded.
+    if loaded_anything {
         mgr.register_default_read_hooks();
     }
 

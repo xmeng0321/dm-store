@@ -1,0 +1,49 @@
+[
+    {
+        "object": "Device.Time.",
+        "access": "readOnly",
+        "parameters": [
+            {
+                "name": "Enable",
+                "access": "readWrite",
+                "dataType": "boolean"
+            },
+            {
+                "name": "Status",
+                "access": "readOnly",
+                "dataType": "enum",
+                "enum": [
+                    "Disabled",
+                    "Unsynchronized",
+                    "Synchronized",
+                    "Error_FailedToSynchronize",
+                    "Error"
+                ]
+            },
+            {
+                "name": "NTPServer1",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "NTPServer2",
+                "access": "readWrite",
+                "dataType": "string(:64)"
+            },
+            {
+                "name": "CurrentLocalTime",
+                "access": "readOnly",
+                "dataType": "dateTime",
+                "map": {
+                    "type": "js",
+                    "cmd": "new Date().toISOString()"
+                }
+            },
+            {
+                "name": "LocalTimeZone",
+                "access": "readWrite",
+                "dataType": "string(:256)"
+            }
+        ]
+    }
+]

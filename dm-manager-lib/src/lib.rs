@@ -1,4 +1,6 @@
 pub mod error;
+pub mod folder;
+pub mod js;
 pub mod loader;
 pub mod manager;
 pub mod parser;
